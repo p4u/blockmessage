@@ -198,10 +198,13 @@ class MessagingTx(object):
             # length byte + data (https://en.bitcoin.it/wiki/Script)
             payload = bytearray((metadata_len,))+metadata
          elif metadata_len <= 256:
-            payload = "\x4c"+bytearray((metadata_len,))+metadata # OP_PUSHDATA1 format
+            # OP_PUSHDATA1 format
+            payload = '\x4c'.encode('utf-8')+bytearray((metadata_len,)) \
+                    +metadata
          else:
-            payload = "\x4d"+bytearray((metadata_len%256,))+bytearray((int(metadata_len/256),))+metadata # OP_PUSHDATA2 format
-
+            # OP_PUSHDATA2 format
+            payload = '\x4d'.encode('utf-8')+bytearray((metadata_len%256,)) \
+                    +bytearray((int(metadata_len/256),))+metadata
          #payload = bytearray() + metadata
          metadata_pos = min(max(0, metadata_pos), len(txn_unpacked['vout'])) # constrain to valid values
 
@@ -250,8 +253,8 @@ class MessagingTx(object):
             return {'error': 'Could not sign the transaction'}
         return {'txid': self.rpc.call("sendrawtransaction", signed_tx['hex'])}
 
-    def get_my_txns(self, init_block, count, send=True, recv=True):
-        txns = self.rpc.call("listtransactions", "*", count , init_block)
+    def get_my_txns(self, count, send=True, recv=True):
+        txns = self.rpc.call("listtransactions", "*", count)
         my_txns = []
         for t in txns:
             if recv and t['category'] == 'receive':
@@ -274,9 +277,9 @@ class MessagingTx(object):
         outputs = {addr: amount, change_address: change_amount}
         return self.build_txn(inputs_spend['inputs'], outputs, msg, len(outputs))
 
-    def get_messages(self, init_block, count=100):
+    def get_messages(self, count=10):
         messages = []
-        for t in self.get_my_txns(init_block, count, send=False):
+        for t in self.get_my_txns(count, send=False):
             op_ret = self.find_op_return(self.get_tx_data(t))
             for msg in op_ret:
                 messages.append(self.hex_to_bin(msg))
@@ -285,4 +288,3 @@ class MessagingTx(object):
     def send_message(self, addr, msg, amount, fee):
         tx = self.create_tx(addr, fee, amount, msg)
         return self.send_raw_tx(tx)
-

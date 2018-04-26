@@ -6,6 +6,7 @@ import hmac
 import hashlib
 import base64
 import ecdsa
+import pyaes
 
 from ecdsa.ecdsa import curve_secp256k1, generator_secp256k1
 from ecdsa.curves import SECP256k1
@@ -69,7 +70,7 @@ class Msqr(object):
             return p
         elif p % 4 == 3:
             return pow(a, (p + 1) // 4, p)
-    
+
         # Partition p-1 to s * 2^e for an odd s (i.e.
         # reduce all the powers of 2 from p-1)
         #
@@ -78,20 +79,20 @@ class Msqr(object):
         while s % 2 == 0:
             s //= 2
             e += 1
-    
+
         # Find some 'n' with a legendre symbol n|p = -1.
         # Shouldn't take long.
         #
         n = 2
         while Msqr.legendre_symbol(n, p) != -1:
             n += 1
-    
+
         # Here be dragons!
         # Read the paper "Square roots from 1; 24, 51,
         # 10 to Dan Shanks" by Ezra Brown for more
         # information
         #
-    
+
         # x is a guess of the square root that gets better
         # with each iteration.
         # b is the "fudge factor" - by how much we're off
@@ -105,7 +106,7 @@ class Msqr(object):
         b = pow(a, s, p)
         g = pow(n, s, p)
         r = e
-    
+
         while True:
             t = b
             m = 0
@@ -113,10 +114,10 @@ class Msqr(object):
                 if t == 1:
                     break
                 t = pow(t, 2, p)
-    
+
             if m == 0:
                 return x
-    
+
             gs = pow(g, 2 ** (r - m - 1), p)
             g = (gs * gs) % p
             x = (x * gs) % p
@@ -261,7 +262,7 @@ class EC_KEY(object):
         s = hex(i)[2:].rstrip('L')
         s = "0"*(2*length - len(s)) + s
         return EC_KEY.rev_hex(s)
-    
+
     @staticmethod
     def var_int(i):
         # https://en.bitcoin.it/wiki/Protocol_specification#Variable_length_integer
@@ -273,7 +274,7 @@ class EC_KEY(object):
             return "fe"+EC_KEY.int_to_hex(i,4)
         else:
             return "ff"+EC_KEY.int_to_hex(i,8)
-    
+
     @staticmethod
     def bh2u(x):
         """
@@ -310,7 +311,7 @@ class EC_KEY(object):
             aes = pyaes.Decrypter(aes_cbc, padding=pyaes.PADDING_NONE)
             data = aes.feed(data) + aes.feed()  # empty aes.feed() flushes buffer
         return EC_KEY.strip_PKCS7_padding(data)
-    
+
     @staticmethod
     def to_bytes(something, encoding='utf8'):
         """
@@ -324,7 +325,7 @@ class EC_KEY(object):
             return bytes(something)
         else:
             raise TypeError("Not a string or bytes like object")
-    
+
     @staticmethod
     def assert_bytes(*args):
         """
@@ -362,13 +363,13 @@ class EC_KEY(object):
             Mx = x + offset
             My2 = pow(Mx, 3, _p) + _a * pow(Mx, 2, _p) + _b % _p
             My = pow(My2, (_p+1)//4, _p )
-    
+
             if curved.contains_point(Mx,My):
                 if odd == bool(My&1):
                     return [My,offset]
                 return [_p-My,offset]
         raise Exception('ECC_YfromX: No Y found')
-   
+
     @staticmethod
     def aes_encrypt_with_iv(key, iv, data):
         EC_KEY.assert_bytes(key, iv, data)
@@ -451,12 +452,12 @@ class EC_KEY(object):
         result.extend([chars[0]] * nPad)
         result.reverse()
         return result.decode('ascii')
-    
+
     @staticmethod
     def EncodeBase58Check(vchIn):
         hash = EC_KEY.Hash(vchIn)
         return EC_KEY.base_encode(vchIn + hash[0:4], base=58)
-    
+
     @staticmethod
     def DecodeBase58Check(psz):
         vchRet = EC_KEY.base_decode(psz, None, base=58)
@@ -486,7 +487,7 @@ class EC_KEY(object):
             neutered_privkey = str(key)[:3] + '..' + str(key)[-2:]
             raise Exception("cannot deserialize privkey {}"
                                    .format(neutered_privkey))
-    
+
         if txin_type is None:
             # keys exported in version 3.0.x encoded script type in first byte
             txin_type = EC_KEY.inv_dict(SCRIPT_TYPES)[vch[0] - WIF_PREFIX]
@@ -494,12 +495,12 @@ class EC_KEY(object):
             # all other keys must have a fixed first byte
             if vch[0] != WIF_PREFIX:
                 raise Exception('invalid prefix ({}) for WIF key'.format(vch[0]))
-    
+
         if len(vch) not in [33, 34]:
             raise BitcoinException('invalid vch len for WIF key: {}'.format(len(vch)))
         compressed = len(vch) == 34
         return txin_type, vch[1:33], compressed
-   
+
     # ECIES encryption/decryption methods; AES-128-CBC with PKCS7 is used as the cipher; hmac-sha256 is used as the mac
 
     @classmethod
@@ -571,4 +572,3 @@ def test():
     #print(ec.verify_message(bytes.fromhex(m_sig), message.encode('utf-8')))
 
 if __name__ == "__main__": test()
-

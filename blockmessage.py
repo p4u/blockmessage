@@ -1,10 +1,11 @@
-#!/bin/env python3
+#!/usr/bin/env python3
 
 from ecies import EC_KEY
 from tx_message import MessagingTx
-import argparse, time, sys
+import argparse, time, sys, binascii
 
-FEE = 0.00000001
+DEFAULT_AMOUNT = 0.00001
+DEFAULT_FEE = 0.00000001
 
 def parse_args():
     parser = argparse.ArgumentParser(description='blockchain tx messaging with encryption')
@@ -41,7 +42,7 @@ def parse_args():
             '-r',
             dest='read',
             type=int,
-            default=None,
+            default=-1,
             help='Read last received messages')
     parser.add_argument(
             '-s',
@@ -70,7 +71,7 @@ def parse_args():
             '--pubkey',
             dest='dst_pubkey',
             default=None,
-            help='If encryption enabled, use destination pubkey')
+            help='If encryption enabled, pubkey of receiver')
     return parser.parse_args()
 
 args = parse_args()
@@ -115,17 +116,31 @@ if args.keysfile:
     except:
         print_and_exit("Wrong keyfile")
 
-if args.read:
-    block_count = int(mtx.get_block_count())
+if args.read > -1:
     if args.read == 0:
-        messages = mtx.get_messages(0,block_count)
-    elif args.read > 0:
-        messages = mtx.get_messages(block_count-args.read,args.read)
+        count = int(mtx.get_block_count())
     else:
-        print_and_exit("Number of blocks to read cannot be negative")
+        count = args.read
+    raw_messages = mtx.get_messages(count)
+    messages = []
+    if args.encrypt:
+        if not privkey:
+            print_and_exit("Cannot decrypt without privatekey! Use -k > file and -i file")
+        for m in raw_messages:
+            pk = EC_KEY.deserialize_privkey(privkey)[1]
+            ec = EC_KEY(pk)
+            try:
+                messages.append(ec.decrypt_message(m))
+            except binascii.Error:
+                pass
+            except Exception as e:
+                print("Got decrypt exception %s" %e)
+    else:
+        messages = raw_messages
+    for m in messages: print("> %s" %m.decode('utf-8'))
 
 if args.fee:
-    FEE = args.fee
+    DEFAULT_FEE = args.fee
 
 if args.send:
     if not args.text:
@@ -134,6 +149,14 @@ if args.send:
         addr = args.send.split(':')[0]
         amount = float(args.send.split(':')[1])
     except:
-        print_and_exit("Invalid send format, use ADDRESS:AMOUNT")
-
-    print(mtx.send_message(addr, args.text, amount, FEE))
+        print("Amount to send not specified or wrong. Using minimum send amount of %f"%DEFAULT_AMOUNT)
+        amount = DEFAULT_AMOUNT
+    if len(addr) < 10:
+        print_and_exit("Destination address looks wrong!")
+    if args.encrypt:
+        if not args.dst_pubkey:
+            print_and_exit("Pubkey --pubkey of receiver must be specified")
+        message = EC_KEY.encrypt_message(args.text.encode('utf-8'), bytes.fromhex(args.dst_pubkey))
+    else:
+        message = args.text
+    print(mtx.send_message(addr, message, amount, DEFAULT_FEE))
