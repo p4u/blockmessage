@@ -9,6 +9,7 @@ As encryption algorithm ECIES is used, so standard BitCoin wallet keys can be us
 ### Usage
 
 The blockchain daemon must be started and synchronized. The RPC port must be reachable, let's assume:
+
 + rpc port 7777
 + rpc user bmsg
 + rpc pass mypass
@@ -17,9 +18,11 @@ First of all, export main wallet keys and an address:
 
 `./blockmessage.py --port=7777 --auth=bmsg:mypass -k > mykey`
 
-Now let's send a plain text message to Alice, you only need one of his wallet addresses
+Now let's send a plain text message to Alice, you only need one of his wallet addresses.
 
-`./blockmessage.py --port=7777 --auth=bmsg:mypass -s <BOB_ADDRESS>:[AMOUNT_TO_SEND]`
+```
+./blockmessage.py --port=7777 --auth=bmsg:mypass -s <BOB_ADDRESS>:[AMOUNT_TO_SEND] --text="Hi Alice, Im Bob, this is my public key 02cc2916ca157ace0009db33b4c0926d23b2ee308a264468454e90db99811869bf and here an address for contacting me RHsvnXGs7iWbyQjJuqgi9VodA7RQWcu2ZM"
+```
 
 Alice will be able to read the message by executing:
 
@@ -28,10 +31,12 @@ Alice will be able to read the message by executing:
 Now, let's use encryption! `cat mykey` will show your public key,
 this is the one you must share with the people who want to secure communicate with you.
 
-If you want to send a message to Bob, you must know in advance his public key and a wallet address. This is how the command would look:
+If Alice wants to send an encrypted message to Bob, she must know in advance his public key and a wallet address. This is why Bob has just sent a plain text message to Alice announcing his public key.
+
+Here is how the send encrypted command would look like (from Bob to Alice):
 
 ```
-./blockmessage.py --port=7777 --auth=bmsg:mypass -i mykey -s RHsvnXGs7iWbyQjJuqgi9VodA7RQWcu2ZM:1 --encrypt --text="Hi Bob, how is your foot doing?" --pubkey=02cc2916ca157ace0009db33b4c0926d23b2ee308a264468454e90db99811869bf
+./blockmessage.py --port=7777 --auth=bmsg:mypass -i mykey -s RHsvnXGs7iWbyQjJuqgi9VodA7RQWcu2ZM:1 --encrypt --text="Hi Bob, your weed is cool. Thanks for sharing!" --pubkey=02cc2916ca157ace0009db33b4c0926d23b2ee308a264468454e90db99811869bf
 ```
 
 Now Bob can read his encrypted messages by executing:
