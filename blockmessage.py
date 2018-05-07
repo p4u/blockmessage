@@ -130,14 +130,17 @@ if args.read > -1:
             pk = EC_KEY.deserialize_privkey(privkey)[1]
             ec = EC_KEY(pk)
             try:
-                messages.append(ec.decrypt_message(m))
+                msg = ec.decrypt_message(m['message'])
+                messages.append({'message':msg,'txid':m['tx']['txid']})
             except binascii.Error:
                 pass
             except Exception as e:
                 print("Got decrypt exception %s" %e)
     else:
-        messages = raw_messages
-    for m in messages: print("> %s" %m.decode('utf-8'))
+        for m in raw_messages:
+            messages.append({'message':m['message'], 'txid':m['tx']['txid']})
+
+    for m in messages: print("> %s [%s]" %(m['message'].decode('utf-8'), m['txid']))
 
 if args.fee:
     DEFAULT_FEE = args.fee

@@ -33,42 +33,190 @@ class RPCHost(object):
         if self.debug: print(responseJSON['result'])
         return responseJSON['result']
 
+# Helper class extracted (and simplified) from pybitcointools for serialize/deserialize
+from _functools import reduce
+class RawTX(object):
 
-# Helper class for unpacking bitcoin binary data
-class Buffer(object):
+    code_strings = {
+        2: '01',
+        10: '0123456789',
+        16: '0123456789abcdef',
+        32: 'abcdefghijklmnopqrstuvwxyz234567',
+        58: '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz',
+        256: ''.join([chr(x) for x in range(256)])
+        }
 
-    def __init__(self, data, ptr=0):
-        self.data = data
-        self.len = len(data)
-        self.ptr = ptr
+    def json_is_base(self, obj, base):
+        if isinstance(obj, bytes):
+            return False
 
-    def shift(self, chars):
-        prefix = self.data[self.ptr:self.ptr+chars]
-        self.ptr += chars
-        return prefix
+        alpha = self.code_strings[base]
+        if isinstance(obj, str):
+            for i in range(len(obj)):
+                if alpha.find(obj[i]) == -1:
+                    return False
+            return True
+        elif isinstance(obj, (int, float)) or obj is None:
+            return True
+        elif isinstance(obj, list):
+            for i in range(len(obj)):
+                if not self.json_is_base(obj[i], base):
+                    return False
+            return True
+        else:
+            for x in obj:
+                if not self.json_is_base(obj[x], base):
+                    return False
+            return True
 
-    def shift_unpack(self, chars, format):
-        unpack=struct.unpack(format, self.shift(chars))
-        return unpack[0]
+    def json_changebase(self, obj, changer):
+        if isinstance(obj, (str, bytes)):
+            return changer(obj)
+        elif isinstance(obj, (int, float)) or obj is None:
+            return obj
+        elif isinstance(obj, list):
+            return [self.json_changebase(x, changer) for x in obj]
+        return dict((x, self.json_changebase(obj[x], changer)) for x in obj)
 
-    def shift_varint(self):
-        value = self.shift_unpack(1, 'B')
-        if value == 0xFF:
-            value = self.shift_uint64()
-        elif value == 0xFE:
-            value = self.shift_unpack(4, '<L')
-        elif value == 0xFD:
-            value = self.shift_unpack(2, '<H')
-        return value
+    def encode(self, val, base, minlen=0):
+        base, minlen = int(base), int(minlen)
+        code_string = self.code_strings[base]
+        result_bytes = bytes()
+        while val > 0:
+            curcode = code_string[val % base]
+            result_bytes = bytes([ord(curcode)]) + result_bytes
+            val //= base
+        pad_size = minlen - len(result_bytes)
 
-    def shift_uint64(self):
-        return self.shift_unpack(4, '<L')+4294967296*self.shift_unpack(4, '<L')
+        padding_element = b'\x00' if base == 256 else b'1' \
+            if base == 58 else b'0'
+        if (pad_size > 0):
+            result_bytes = padding_element*pad_size + result_bytes
 
-    def used(self):
-        return min(self.ptr, self.len)
+        result_string = ''.join([chr(y) for y in result_bytes])
+        result = result_bytes if base == 256 else result_string
 
-    def remaining(self):
-        return max(self.len-self.ptr, 0)
+        return result
+
+    def decode(self, string, base):
+        if base == 256 and isinstance(string, str):
+            string = bytes(bytearray.fromhex(string))
+        base = int(base)
+        code_string = self.code_strings[base]
+        result = 0
+        if base == 256:
+            def extract(d, cs):
+                return d
+        else:
+            def extract(d, cs):
+                return cs.find(d if isinstance(d, str) else chr(d))
+
+        if base == 16:
+            string = string.lower()
+        while len(string) > 0:
+            result *= base
+            result += extract(string[0], code_string)
+            string = string[1:]
+        return result
+
+    def safe_hexlify(self, a):
+        return str(binascii.hexlify(a), 'utf-8')
+
+    def from_int_to_byte(self, a):
+        return bytes([a])
+
+    def from_byte_to_int(self, a):
+        return a
+
+    def num_to_var_int(self, x):
+        x = int(x)
+        if x < 253: return self.from_int_to_byte(x)
+        elif x < 65536: return self.from_int_to_byte(253)+self.encode(x, 256, 2)[::-1]
+        elif x < 4294967296: return self.from_int_to_byte(254) + self.encode(x, 256, 4)[::-1]
+        else: return self.from_int_to_byte(255) + self.encode(x, 256, 8)[::-1]
+
+    def read_as_int(self, bytez):
+        pos[0] += bytez
+        return self.decode(tx[pos[0]-bytez:pos[0]][::-1], 256)
+
+    def bytes_to_hex_string(self, b):
+        if isinstance(b, str):
+            return b
+        return ''.join('{:02x}'.format(y) for y in b)
+
+    def deserialize(self, tx):
+        if isinstance(tx, str) and re.match('^[0-9a-fA-F]*$', tx):
+            #tx = bytes(bytearray.fromhex(tx))
+            return self.json_changebase(self.deserialize(binascii.unhexlify(tx)),
+                                  lambda x: self.safe_hexlify(x))
+        # http://stackoverflow.com/questions/4851463/python-closure-write-to-variable-in-parent-scope
+        # Python's scoping rules are demented, requiring me to make pos an object
+        # so that it is call-by-reference
+        pos = [0]
+
+        def read_as_int(bytez):
+            pos[0] += bytez
+            return self.decode(tx[pos[0]-bytez:pos[0]][::-1], 256)
+
+        def read_var_int():
+            pos[0] += 1
+
+            val = self.from_byte_to_int(tx[pos[0]-1])
+            if val < 253:
+                return val
+            return self.read_as_int(pow(2, val - 252))
+
+        def read_bytes(bytez):
+            pos[0] += bytez
+            return tx[pos[0]-bytez:pos[0]]
+
+        def read_var_string():
+            size = read_var_int()
+            return read_bytes(size)
+
+        obj = {"ins": [], "outs": []}
+        obj["version"] = read_as_int(4)
+        ins = read_var_int()
+        for i in range(ins):
+            obj["ins"].append({
+                "outpoint": {
+                    "hash": read_bytes(32)[::-1],
+                    "index": read_as_int(4)
+                },
+                "script": read_var_string(),
+                "sequence": read_as_int(4)
+            })
+        outs = read_var_int()
+        for i in range(outs):
+            obj["outs"].append({
+                "value": read_as_int(8),
+                "script": read_var_string()
+            })
+        obj["locktime"] = read_as_int(4)
+        return obj
+
+    def serialize(self, txobj):
+        if isinstance(txobj, bytes):
+            txobj = bytes_to_hex_string(txobj)
+        o = []
+        if self.json_is_base(txobj, 16):
+            json_changedbase = self.json_changebase(txobj, lambda x: binascii.unhexlify(x))
+            hexlified = self.safe_hexlify(self.serialize(json_changedbase))
+            return hexlified
+        o.append(self.encode(txobj["version"], 256, 4)[::-1])
+        o.append(self.num_to_var_int(len(txobj["ins"])))
+        for inp in txobj["ins"]:
+            o.append( inp["outpoint"]["hash"][::-1] )
+            o.append(self.encode(inp["outpoint"]["index"], 256, 4)[::-1])
+            o.append(self.num_to_var_int(len(inp["script"]))+( inp["script"] if inp["script"] else bytes()))
+            o.append(self.encode(inp["sequence"], 256, 4)[::-1])
+        o.append(self.num_to_var_int(len(txobj["outs"])))
+        for out in txobj["outs"]:
+            o.append(self.encode(out["value"], 256, 8)[::-1])
+            o.append( self.num_to_var_int(len(out["script"])) + out["script"] )
+        o.append(self.encode(txobj["locktime"], 256, 4)[::-1])
+        return reduce(lambda x,y: x+y, o, bytes())
+
 
 class MessagingTx(object):
 
@@ -100,52 +248,10 @@ class MessagingTx(object):
 
     def hex_to_bin(self, hex):
         try: raw = binascii.a2b_hex(hex)
-        except: raw = None
+        except Exception as e:
+            raw = None
+            print(e)
         return raw
-
-    def pack_varint(self, integer):
-            if integer > 0xFFFFFFFF:
-                    packed = "\xFF"+self.pack_uint64(integer)
-            elif integer > 0xFFFF:
-                    packed = "\xFE"+struct.pack('<L', integer)
-            elif integer > 0xFC:
-                    packed = "\xFD".struct.pack('<H', integer)
-            else:
-                    packed = struct.pack('B', integer)
-            return packed
-
-    def pack_uint64(self, integer):
-            upper=int(integer/4294967296)
-            lower=integer-upper*4294967296
-            return struct.pack('<L', lower)+struct.pack('<L', upper)
-
-    def unpack_txn_buffer(self, buffer):
-            # see: https://en.bitcoin.it/wiki/Transactions
-            txn = { 'vin': [], 'vout': [] }
-            # small-endian 32-bits
-            txn['version'] = buffer.shift_unpack(4, '<L')
-            inputs = buffer.shift_varint()
-            if inputs > 100000: # sanity check
-                    return None
-            for _ in range(inputs):
-                input={}
-                input['txid'] = self.bin_to_hex(buffer.shift(32)[::-1])
-                input['vout'] = buffer.shift_unpack(4, '<L')
-                length = buffer.shift_varint()
-                input['scriptSig'] = self.bin_to_hex(buffer.shift(length))
-                input['sequence'] = buffer.shift_unpack(4, '<L')
-                txn['vin'].append(input)
-            outputs = buffer.shift_varint()
-            if outputs > 100000: # sanity check
-                return None
-            for _ in range(outputs):
-               output = {}
-               output['value'] = float(buffer.shift_uint64())/100000000
-               length = buffer.shift_varint()
-               output['scriptPubKey'] = self.bin_to_hex(buffer.shift(length))
-               txn['vout'].append(output)
-            txn['locktime'] = buffer.shift_unpack(4, '<L')
-            return txn
 
     def get_block_txns(self, height):
             block = self.rpc.call("getblock", height)
@@ -163,83 +269,40 @@ class MessagingTx(object):
                     op_return.append(asm[i+1])
         return op_return
 
-    def pack_txn(self, txn):
-        binary = b''
-        binary += struct.pack('<L', txn['version'])
-        binary += self.pack_varint(len(txn['vin']))
-
-        for input in txn['vin']:
-                binary += self.hex_to_bin(input['txid'])[::-1]
-                binary += struct.pack('<L', input['vout'])
-                binary += self.pack_varint(int(len(input['scriptSig'])/2)) # divide by 2 be
-                binary += self.hex_to_bin(input['scriptSig'])
-                binary += struct.pack('<L', input['sequence'])
-
-        binary += self.pack_varint(len(txn['vout']))
-
-        for output in txn['vout']:
-                binary += self.pack_uint64(int(round(output['value']*100000000)))
-                binary += self.pack_varint(int(len(output['scriptPubKey'])/2)) # divide by
-                binary += self.hex_to_bin(output['scriptPubKey'])
-
-        binary += struct.pack('<L', txn['locktime'])
-
-        return binary
-
-    def build_txn(self, inputs, outputs, metadata, metadata_pos):
+    def build_txn(self, inputs, outputs, metadata):
          raw_txn = self.rpc.call('createrawtransaction', inputs, outputs)
-         raw_tx = self.hex_to_bin(raw_txn)
-         txn_unpacked = self.unpack_txn_buffer(Buffer(raw_tx))
-
+         #rawtx = RawTX()
+         txn = RawTX().deserialize(raw_txn)
          if type(metadata) == str: metadata = metadata.encode('utf-8')
-         metadata_len = len(metadata)
-
-         if metadata_len <= 75:
-            # length byte + data (https://en.bitcoin.it/wiki/Script)
-            payload = bytearray((metadata_len,))+metadata
-         elif metadata_len <= 256:
-            # OP_PUSHDATA1 format
-            payload = '\x4c'.encode('utf-8')+bytearray((metadata_len,)) \
-                    +metadata
-         else:
-            # OP_PUSHDATA2 format
-            payload = '\x4d'.encode('utf-8')+bytearray((metadata_len%256,)) \
-                    +bytearray((int(metadata_len/256),))+metadata
-         #payload = bytearray() + metadata
-         metadata_pos = min(max(0, metadata_pos), len(txn_unpacked['vout'])) # constrain to valid values
-
-         txn_unpacked['vout'][metadata_pos:metadata_pos]=[{
+         hex_metadata = self.bin_to_hex(metadata)
+         op_return = '6a'
+         op_pushdata = '4d'
+         metadata_len_little = self.bin_to_hex(struct.pack('<H', len(metadata)))
+         payload =  op_return + op_pushdata + metadata_len_little + hex_metadata
+         txn['outs'].append({
                  'value': 0,
-                 'scriptPubKey': '6a'+self.bin_to_hex(payload) # here's the OP_RETURN
-         }]
-
-         return self.bin_to_hex(self.pack_txn(txn_unpacked))
+                 'script': payload
+         })
+         return RawTX().serialize(txn)
 
     def select_inputs(self, total_amount):
         # List and sort unspent inputs by priority
-
         unspent_inputs = self.rpc.call("listunspent")
         if not isinstance(unspent_inputs, list):
                 return {'error': 'Could not retrieve list of unspent inputs'}
-
         unspent_inputs.sort(key=lambda unspent_input:
                         unspent_input['amount']*unspent_input['confirmations'],
                         reverse=True)
         # Identify which inputs should be spent
         inputs_spend = []
         input_amount = 0
-        #print("Available unspend inputs: %s" %len(unspent_inputs))
         for unspent_input in unspent_inputs:
             inputs_spend.append({'txid':unspent_input['txid'],'vout':unspent_input['vout']})
-
             input_amount += unspent_input['amount']
             if input_amount >= total_amount:
                 break # stop when we have enough
-
         if input_amount < total_amount:
             return {'error': 'Not enough funds are available to cover the amount and fee'}
-
-        # Return the successful result
         return {'inputs': inputs_spend,'total': input_amount}
 
     def get_tx_data(self, txid):
@@ -253,14 +316,22 @@ class MessagingTx(object):
             return {'error': 'Could not sign the transaction'}
         return {'txid': self.rpc.call("sendrawtransaction", signed_tx['hex'])}
 
+    def get_received_unspent_txs(self):
+        unspent = self.rpc.call("listunspent")
+        my_txns = []
+        for t in unspent:
+            if not t['generated'] and t['spendable']:
+                my_txns.append(t)
+        return my_txns
+
     def get_my_txns(self, count, send=True, recv=True):
         txns = self.rpc.call("listtransactions", "*", count)
         my_txns = []
         for t in txns:
             if recv and t['category'] == 'receive':
-                my_txns.append(t['txid'])
+                my_txns.append(t)
             if send and t['category'] == 'send':
-                my_txns.append(t['txid'])
+                my_txns.append(t)
         return my_txns
 
     def create_tx(self, addr, fee, amount, msg=None):
@@ -275,14 +346,18 @@ class MessagingTx(object):
         change_amount = round(inputs_spend['total'] - output_amount, 8)
         change_address = self.rpc.call('getrawchangeaddress')
         outputs = {addr: amount, change_address: change_amount}
-        return self.build_txn(inputs_spend['inputs'], outputs, msg, len(outputs))
+        return self.build_txn(inputs_spend['inputs'], outputs, msg)
 
-    def get_messages(self, count=10):
+    def get_messages(self, count=10, unspent=False):
         messages = []
-        for t in self.get_my_txns(count, send=False):
-            op_ret = self.find_op_return(self.get_tx_data(t))
+        my_txns = self.get_received_unspent_txs() if unspent else self.get_my_txns(count, send=False)
+        for t in my_txns:
+            op_ret = self.find_op_return(self.get_tx_data(t['txid']))
             for msg in op_ret:
-                messages.append(self.hex_to_bin(msg))
+                messages.append({
+                    'message': self.hex_to_bin(msg),
+                    'tx':t
+                    })
         return messages
 
     def send_message(self, addr, msg, amount, fee):
