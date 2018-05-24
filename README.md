@@ -36,7 +36,7 @@ If Alice wants to send an encrypted message to Bob, she must know in advance his
 Here is how the send encrypted command would look like (from Bob to Alice):
 
 ```
-./blockmessage.py --port=7777 --auth=bmsg:mypass -i mykey -s RHsvnXGs7iWbyQjJuqgi9VodA7RQWcu2ZM:1 --encrypt --text="Hi Bob, your weed is cool. Thanks for sharing!" --pubkey=02cc2916ca157ace0009db33b4c0926d23b2ee308a264468454e90db99811869bf
+./blockmessage.py --port=7777 --auth=bmsg:mypass -i mykey -s RHsvnXGs7iWbyQjJuqgi9VodA7RQWcu2ZM:1 --encrypt RSA --text="Hi Bob, your weed is cool. Thanks for sharing!" --pubkey=dst_pubkey
 ```
 
 Now Bob can read his encrypted messages by executing:
@@ -53,7 +53,7 @@ That's it!
 ```
 usage: blockmessage.py [-h] [--host RPC_HOST] [--port RPC_PORT]
                        [--auth RPC_AUTH] [-k] [-i KEYSFILE] [-r READ]
-                       [-s SEND] [--fee FEE] [--text TEXT] [--encrypt]
+                       [-s SEND] [--fee FEE] [--text TEXT] [--encrypt ALGORITHM]
                        [--pubkey DST_PUBKEY]
 
 blockchain tx messaging with encryption
@@ -69,6 +69,6 @@ optional arguments:
   -s SEND              Send a message to address
   --fee FEE            Specify fee for transaction
   --text TEXT          Text to send in message
-  --encrypt            Turn on encryption
+  --encrypt            Turn on encryption, choose encryption algorithm (RSA by default, ECIES optional)
   --pubkey DST_PUBKEY  If encryption enabled, use destination pubkey
 ```
