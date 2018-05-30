@@ -3,6 +3,7 @@
 from ecies import EC_KEY
 from tx_message import MessagingTx
 import argparse, time, sys, binascii
+from rsa import RSA_SYS
 
 DEFAULT_AMOUNT = 0.00001
 DEFAULT_FEE = 0.00000001
@@ -65,8 +66,9 @@ def parse_args():
     parser.add_argument(
             '--encrypt',
             dest='encrypt',
-            action="store_true",
-            help='Turn on encryption')
+            type=str,
+            default="RSA",
+            help='Choose encryption algorithm, RSA by default')
     parser.add_argument(
             '--pubkey',
             dest='dst_pubkey',
@@ -110,8 +112,15 @@ if args.keysfile:
         with open(args.keysfile, 'r') as kf:
             raw_keys = kf.read()
         keys = eval(raw_keys)
-        privkey = keys['private_key']
-        pubkey = keys['public_key']
+        if args.encrypt:
+            if args.encrypt=="ECIES":
+                privkey = keys['private_key']
+                pubkey = keys['public_key']
+            elif args.encrypt=="RSA":
+                filePrivKey = open(keys['private_key'], "r")
+                privkey = filePrivKey.read()
+                pubkey = RSA_SYS.pubKFromPrivK(privkey)
+
         address = keys['address']
     except:
         print_and_exit("Wrong keyfile")
@@ -127,10 +136,18 @@ if args.read > -1:
         if not privkey:
             print_and_exit("Cannot decrypt without privatekey! Use -k > file and -i file")
         for m in raw_messages:
-            pk = EC_KEY.deserialize_privkey(privkey)[1]
-            ec = EC_KEY(pk)
+            if args.encrypt=="ECIES":
+                pk = EC_KEY.deserialize_privkey(privkey)[1]
+                ec = EC_KEY(pk)
             try:
-                msg = ec.decrypt_message(m['message'])
+                if args.encrypt=="ECIES":
+                    msg = ec.decrypt_message(m['message'])
+                elif args.encrypt=="RSA":
+                    msg = RSA_SYS.decrypt_message(privK, m['message'])
+                else:
+                    # no encryption
+                    msg = m['message']
+
                 messages.append({'message':msg,'txid':m['tx']['txid']})
             except binascii.Error:
                 pass
@@ -159,7 +176,12 @@ if args.send:
     if args.encrypt:
         if not args.dst_pubkey:
             print_and_exit("Pubkey --pubkey of receiver must be specified")
-        message = EC_KEY.encrypt_message(args.text.encode('utf-8'), bytes.fromhex(args.dst_pubkey))
+        if args.encrypt=="ECIES":
+            message = EC_KEY.encrypt_message(args.text.encode('utf-8'), bytes.fromhex(args.dst_pubkey))
+        elif args.encrypt=="RSA":
+            filePubKey = open(args.dst_pubkey, "r")
+            pubkey = file.read()
+            msg = RSA_SYS.encrypt_message(pubkey, args.text.encode('utf-8'))
     else:
         message = args.text
     print(mtx.send_message(addr, message, amount, DEFAULT_FEE))
