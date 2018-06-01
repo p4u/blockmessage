@@ -334,6 +334,23 @@ class MessagingTx(object):
                 my_txns.append(t)
         return my_txns
 
+    def lock_tx(self, txid, vout=0):
+        return self.rpc.call('lockunspent', False, [{'txid':txid,'vout':vout}])
+
+    def unlock_tx(self, txid, vout=0):
+        return self.rpc.call('lockunspent', True, [{'txid':txid,'vout':vout}])
+
+    def lock_all(self, unless_txid=[]):
+        unspent = self.get_received_unspent_txs()
+        for tx in unspent:
+            if tx['txid'] in unless_txid: continue
+            self.lock_tx(tx['txid'], int(tx['vout']))
+
+    def unlock_all(self):
+        locked = self.rpc.call('listlockunspent')
+        for tx in locked:
+            self.unlock_tx(tx['txid'], int(tx['vout']))
+
     def create_tx(self, addr, fee, amount, msg=None):
         output_amount = amount + fee
         inputs_spend = self.select_inputs(output_amount)
