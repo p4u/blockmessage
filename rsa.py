@@ -1,26 +1,37 @@
-from Crypto.PublicKey import RSA
-from Crypto.Cipher import PKCS1_v1_5
 import base64
 import binascii
+# pip3 install pycrypto (https://www.dlitz.net/software/pycrypto)
+import Crypto.PublicKey.RSA as RSA
+import Crypto.Cipher.PKCS1_v1_5 as PKCS
 
 class RSA_SYS(object):
-    def pubKFromPrivK(privK):
-        rsa = RSA.importKey(privK)
-        pubK = rsa.publickey().exportKey()
-        return (pubK)
+    def __init__(self, privkey=None, pubkey=None):
+        if not pubkey and privkey:
+            rsa = RSA.importKey(privkey)
+            pubkey = rsa.publickey().exportKey()
+        self.pub = pubkey
+        self.priv = privkey
 
-    def encrypt_message(pubK, msg):
-        # pubK is in string format
-        rsaToEncrypt = RSA.importKey(pubK)
-        cipher = PKCS1_v1_5.new(rsaToEncrypt)
-        ciphertext = cipher.encrypt(msg.encode('utf8'))
-        return base64.b64encode(ciphertext).decode('ascii')
+    @staticmethod
+    def generate(bits=2048):
+        key = RSA.generate(2048)
+        return key.exportKey('PEM')
 
-    def decrypt_message(privK, msg):
-        # privK is in string format
-        rsaToEncrypt = RSA.importKey(privK)
-        cipher = PKCS1_v1_5.new(rsaToEncrypt)
-        ciphertext = base64.b64decode(msg.encode('ascii'))
+    def get_pubkey(self):
+        return self.pub
+
+    def encrypt_message(self, msg):
+        if not self.pub: raise Exception("No RSA pubkey provided")
+        rsaToEncrypt = RSA.importKey(self.pub)
+        cipher = PKCS.new(rsaToEncrypt)
+        ciphertext = cipher.encrypt(msg.encode('utf-8'))
+        return base64.b64encode(ciphertext).decode('utf-8')
+
+    def decrypt_message(self, msg):
+        if not self.priv: raise Exception("No RSA privkey provided")
+        rsaToEncrypt = RSA.importKey(self.priv)
+        cipher = PKCS.new(rsaToEncrypt)
+        ciphertext = base64.b64decode(msg.encode('utf-8'))
         plaintext = cipher.decrypt(ciphertext, b'DECRYPTION FAILED')
         return plaintext.decode('utf8')
 
@@ -35,20 +46,26 @@ def test():
     8RzaV1GmjMEJxw9vM/tQwQg0kyAPlITMRXnwGA6E0A==
     -----END RSA PRIVATE KEY-----"""
 
-
-    pubkey = RSA_SYS.pubKFromPrivK(privkey)
+    rsa = RSA_SYS(privkey=privkey)
+    pubkey = rsa.get_pubkey()
     print("")
-    print(pubkey)
+    print(pubkey.decode('utf-8'))
     print("")
 
     message = "This is an encrypted message from python"
-    ciphertext = RSA_SYS.encrypt_message(pubkey, message)
-    print(ciphertext)
-    plaintext = RSA_SYS.decrypt_message(privkey, ciphertext)
+    ciphertext = rsa.encrypt_message(message)
+    print('Encrypted: ' + ciphertext)
+    plaintext = rsa.decrypt_message(ciphertext)
     print(plaintext)
 
     # the next encrypted string is encrypted from the javascript version
-    plaintext = RSA_SYS.decrypt_message(privkey, "PrJupfeUykP98ltrvZOBXKbOFYYBL+iJinNb/DaLzN7nW34VjUtyD5SkyRoUV3quiS3Z+Dh1TSChoOji5e8iZg==")
+    plaintext = rsa.decrypt_message("PrJupfeUykP98ltrvZOBXKbOFYYBL+iJinNb/DaLzN7nW34VjUtyD5SkyRoUV3quiS3Z+Dh1TSChoOji5e8iZg==")
     print(plaintext)
+
+    new_key = RSA_SYS.generate()
+    rsa = RSA_SYS(privkey=new_key)
+    pubkey = rsa.get_pubkey()
+    print(new_key.decode('utf-8'))
+    print(pubkey.decode('utf-8'))
 
 if __name__ == "__main__": test()
