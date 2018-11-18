@@ -6,6 +6,9 @@ As encryption algorithm ECIES is used, so standard BitCoin wallet keys can be us
 
 *Warning: in alpha/PoC state*
 
+*Warning: current implementation works for KOMODO, not tested in BitCoin nor other blockchains, but it should work just changing few parameters*
+
+
 ### Usage
 
 The blockchain daemon must be started and synchronized. The RPC port must be reachable, let's assume:
